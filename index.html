@@ -36,10 +36,15 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 </head>
 <body>
 <header>
-  <h1>ID保管庫 <span class="mut" style="font-size:12px">v1.1</span></h1>
-  <div id="lockbar" class="row hidden">
-    <input id="q" type="search" placeholder="検索（名前・ID・サービス名）" style="flex:3">
-    <button id="btn-lock" class="ghost" style="flex:1">ロック</button>
+  <h1>ID保管庫 <span class="mut" style="font-size:12px">v1.2</span></h1>
+  <div id="lockbar" class="hidden">
+    <div class="row">
+      <input id="q" type="search" placeholder="検索（名前・ID・サービス名・タグ・メモ）" style="flex:3">
+      <button id="btn-lock" class="ghost" style="flex:1">ロック</button>
+    </div>
+    <div id="filters" style="margin-top:6px">
+      <span class="chip fchip" data-f="">すべて</span><span class="chip fchip" data-f="account">アカウント</span><span class="chip fchip" data-f="post">投稿</span><span class="chip fchip" data-f="card">カード</span><span class="chip fchip" data-f="memo">メモ</span><span class="chip fchip" data-f="site">サイト</span>
+    </div>
   </div>
 </header>
 <main>
@@ -68,29 +73,37 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
   <dialog id="dlg">
     <form method="dialog" id="form">
       <h3 id="dlg-title" style="margin:4px 0">追加</h3>
+      <div id="url-block">
       <label>URLを貼る（サービスはドメインで自動判定）</label>
       <div class="row"><input id="f-url" type="url" placeholder="https://…" style="flex:3"><button type="button" id="btn-parse" style="flex:1">判定</button></div>
       <p class="mut" id="parse-note"></p>
+      </div>
       <label>種類</label>
       <select id="f-kind">
         <option value="account">アカウント / ID</option>
         <option value="post">投稿（ツイート・動画など）</option>
         <option value="site">サイト</option>
         <option value="card">クレジットカード</option>
+        <option value="memo">普通のメモ</option>
         <option value="other">その他</option>
       </select>
-      <label>サービス</label><input id="f-service" placeholder="X / TikTok / Instagram …">
+      <div id="svc-block">
+      <label>サービス</label><input id="f-service" placeholder="X / TikTok / Discord / Steam …（自由入力OK）">
+      </div>
       <label>表示名</label><input id="f-title" placeholder="名前・メモ用の見出し">
+      <div id="id-block">
       <label id="lb-userid">ユーザーID（@スクリーンネーム等）</label><input id="f-userid">
       <label id="lb-permid">恒久ID（改名しても変わらないID）</label><input id="f-permid">
       <p class="mut" id="permid-hint"></p>
+      </div>
       <div id="card-fields" class="hidden">
         <label>カード番号</label><input id="f-cardnum" inputmode="numeric" autocomplete="off" placeholder="数字のみ">
         <div class="row"><div><label>有効期限（MM/YY）</label><input id="f-exp" placeholder="12/28"></div>
         <div><label>名義</label><input id="f-name"></div></div>
         <p class="mut" id="card-brand"></p>
       </div>
-      <label>メモ</label><textarea id="f-memo" rows="3"></textarea>
+      <label>タグ（カンマ区切り）</label><input id="f-tags" placeholder="例: ゲーム, 仕事, 推し">
+      <label>メモ</label><textarea id="f-memo" rows="5"></textarea>
       <p class="err" id="form-err"></p>
       <div class="row" style="margin-top:12px">
         <button type="button" id="btn-save">保存</button>
@@ -103,8 +116,13 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
   <div id="tools" class="hidden" style="margin-top:16px">
     <div class="row">
       <button id="btn-export" class="ghost">暗号化バックアップをファイルに書き出す</button>
+      <button id="btn-import2" class="ghost">バックアップを読み込む（合体）</button>
+      <input id="file-import2" type="file" accept=".json" class="hidden">
+    </div>
+    <div class="row" style="margin-top:8px">
       <button id="btn-chpw" class="ghost">パスワード変更</button>
     </div>
+    <p class="mut">読み込みは2通り：ロック画面から読み込むと保管庫ごと入れ替え、今の画面から読み込むと今の内容に合体します（消えません）。どちらもファイルは暗号化されたまま扱います。</p>
   </div>
 </main>
 <button id="fab" class="hidden">＋</button>
@@ -184,6 +202,40 @@ function parseUrl(raw) {
     out.permidHint = "YouTubeは UC から始まるチャンネルIDが恒久。@ハンドルは変更可能です。";
   } else if (host.endsWith("github.com")) {
     out.service = "GitHub"; out.kind = "account"; if (seg[0]) out.userid = seg[0];
+  } else if (host === "steamcommunity.com") {
+    out.service = "Steam";
+    if (seg[0] === "profiles" && /^\d{17}$/.test(seg[1]||"")) { out.kind="account"; out.permid = seg[1]; out.note = "SteamID64（恒久）で保存。このIDのリンクで開きます。"; }
+    else if (seg[0] === "id" && seg[1]) { out.kind="account"; out.userid = seg[1]; out.note = "カスタムURL名は変更可能です。SteamID64が分かれば恒久ID欄へ。"; }
+    else if (seg[0] === "sharedfiles" || seg[0] === "app") { out.kind = "post"; }
+    out.permidHint = "Steamは 7656 から始まる17桁の SteamID64 が恒久IDです。";
+  } else if (host.endsWith("discord.com") || host.endsWith("discordapp.com")) {
+    out.service = "Discord";
+    if (seg[0] === "users" && /^\d+$/.test(seg[1]||"")) { out.kind="account"; out.permid = seg[1]; out.note = "DiscordユーザーID（恒久）で保存。ユーザー名が変わっても同一人物です。"; }
+    else if (seg[0] === "channels") { out.kind = "site"; out.title = "Discordチャンネル"; }
+    out.permidHint = "Discordの数値ユーザーIDは恒久。開発者モードでユーザーをコピーすると取れます。";
+  } else if (host.endsWith("twitch.tv")) {
+    out.service = "Twitch"; out.kind = "account"; if (seg[0]) out.userid = seg[0];
+    out.permidHint = "Twitchの表示名/ログイン名は変更可能。数値IDが分かれば恒久ID欄へ。";
+  } else if (host === "bsky.app") {
+    out.service = "Bluesky";
+    if (seg[0] === "profile" && seg[1]) {
+      out.kind = "account";
+      if (seg[1].startsWith("did:")) { out.permid = seg[1]; out.note = "DID（恒久）で保存。ハンドルが変わっても追えます。"; }
+      else out.userid = seg[1];
+      if (seg[2] === "post" && seg[3]) { out.kind = "post"; out.permid = seg[3]; out.title = "Bluesky投稿"; }
+    }
+    out.permidHint = "Blueskyは did:plc:… のDIDが恒久ID。@ハンドルは変更可能です。";
+  } else if (host.endsWith("reddit.com")) {
+    out.service = "Reddit";
+    if ((seg[0] === "user" || seg[0] === "u") && seg[1]) { out.kind="account"; out.userid = seg[1]; out.note = "Redditのユーザー名は作成後に変更できません。"; }
+  } else if (host.endsWith("pixiv.net")) {
+    out.service = "pixiv";
+    if (seg.includes("users")) { out.kind="account"; out.permid = seg[seg.indexOf("users")+1]||""; out.note = "pixivのユーザーID（数値・恒久）で保存。"; }
+    else if (u.searchParams.get("illust_id")) { out.kind="post"; out.permid = u.searchParams.get("illust_id"); }
+  } else if (seg[0]?.startsWith("@") && seg.length <= 2) {
+    /* Mastodon等： /@user 形式の汎用判定 */
+    out.service = host; out.kind = "account"; out.userid = seg[0].slice(1);
+    out.note = "このサーバー上のアカウントとして取り込みました。";
   } else {
     out.service = host; out.kind = "site"; out.title = host;
   }
@@ -193,6 +245,8 @@ function openUrl(e) {
   if (e.kind === "account" && e.permid) {
     if (e.service === "X") return "https://x.com/i/user/" + e.permid;
     if (e.service === "YouTube") return "https://www.youtube.com/channel/" + e.permid;
+    if (e.service === "Steam") return "https://steamcommunity.com/profiles/" + e.permid;
+    if (e.service === "pixiv") return "https://www.pixiv.net/users/" + e.permid;
   }
   return e.url || "";
 }
@@ -245,22 +299,30 @@ document.addEventListener("visibilitychange", () => {
 });
 $("q").oninput = () => render();
 
+let filterKind = "";
+document.querySelectorAll(".fchip").forEach(c => c.onclick = () => {
+  filterKind = c.dataset.f;
+  document.querySelectorAll(".fchip").forEach(x => x.style.color = x === c ? "#4f8cff" : "");
+  render();
+});
 function render() {
   const q = ($("q").value||"").toLowerCase(), el = $("list"); el.innerHTML = "";
-  const items = vault.items.filter(e => !q || JSON.stringify(e).toLowerCase().includes(q));
+  const items = vault.items.filter(e => (!filterKind || e.kind === filterKind) && (!q || JSON.stringify(e).toLowerCase().includes(q)));
   if (!items.length) { el.innerHTML = '<p class="mut">まだ何もありません。右下の＋から、URLを貼るだけで追加できます。</p>'; return; }
   for (const e of items) {
     const d = document.createElement("div"); d.className = "card";
     const shown = e.kind === "card" ? maskNum(e.cardnum) : (e.userid ? "@"+e.userid : (e.permid||""));
+    const tagChips = (e.tags||"").split(/[,、]/).map(t=>t.trim()).filter(Boolean).map(t=>`<span class="chip">${t.replace(/</g,"&lt;")}</span>`).join("");
     d.innerHTML = `<div class="svc"></div><div class="ttl"></div><div class="sub"></div>
-      <div>${e.permid?'<span class="chip">恒久IDあり（改名OK）</span>':""}${e.kind==="card"?'<span class="chip"></span>':""}</div>
+      <div>${e.permid?'<span class="chip">恒久IDあり（改名OK）</span>':""}${e.kind==="card"?'<span class="chip"></span>':""}${tagChips}</div>
       <div class="acts"><button class="ghost b-open">開く</button><button class="ghost b-copy">IDをコピー</button><button class="ghost b-edit">編集</button></div>`;
     d.querySelector(".svc").textContent = e.service || e.kind;
     d.querySelector(".ttl").textContent = e.title || e.userid || e.service || "(無題)";
     d.querySelector(".sub").textContent = shown + (e.memo ? " ／ " + e.memo : "");
     const chips = d.querySelectorAll(".chip"); if (chips[1]) chips[1].textContent = cardBrand(e.cardnum||"");
     const url = openUrl(e);
-    d.querySelector(".b-open").onclick = () => { if (url) location.href = url; else if (e.kind==="card") { alert("カード番号（下4桁）: " + maskNum(e.cardnum) + "\n全番号は編集画面で確認できます。"); } };
+    d.querySelector(".b-open").textContent = url ? "開く" : "見る";
+    d.querySelector(".b-open").onclick = () => { if (url) location.href = url; else if (e.kind==="card") { alert("カード番号（下4桁）: " + maskNum(e.cardnum) + "\n全番号は編集画面で確認できます。"); } else openForm(e); };
     d.querySelector(".b-copy").onclick = ev => { navigator.clipboard?.writeText(e.permid || e.userid || e.cardnum || ""); ev.target.textContent = "コピー済み"; setTimeout(()=>ev.target.textContent="IDをコピー",1200); };
     d.querySelector(".b-edit").onclick = () => openForm(e);
     el.appendChild(d);
@@ -271,13 +333,20 @@ function render() {
 function openForm(e) {
   editId = e ? e.id : null;
   $("dlg-title").textContent = e ? "編集" : "追加";
-  for (const k of ["url","service","title","userid","permid","cardnum","exp","name","memo"]) $("f-"+k).value = e ? (e[k]||"") : "";
+  for (const k of ["url","service","title","userid","permid","cardnum","exp","name","memo","tags"]) $("f-"+k).value = e ? (e[k]||"") : "";
   $("f-kind").value = e ? e.kind : "account";
   $("btn-del").classList.toggle("hidden", !e);
   $("parse-note").textContent = ""; $("permid-hint").textContent = "";
   toggleCardFields(); $("dlg").showModal();
 }
-function toggleCardFields(){ $("card-fields").classList.toggle("hidden", $("f-kind").value !== "card"); }
+function toggleCardFields(){
+  const k = $("f-kind").value;
+  $("card-fields").classList.toggle("hidden", k !== "card");
+  const isMemo = k === "memo";
+  $("url-block").classList.toggle("hidden", isMemo);
+  $("id-block").classList.toggle("hidden", isMemo);
+  $("svc-block").classList.toggle("hidden", isMemo);
+}
 $("f-kind").onchange = toggleCardFields;
 $("f-cardnum").oninput = () => { const n=$("f-cardnum").value; $("card-brand").textContent = n ? (cardBrand(n) + (luhn(n)?" ／ 番号チェックOK":" ／ 番号を確認してください")) : ""; };
 $("btn-parse").onclick = () => {
@@ -298,9 +367,9 @@ $("btn-save").onclick = async () => {
     url:$("f-url").value.trim(), service:$("f-service").value.trim(), title:$("f-title").value.trim(),
     userid:$("f-userid").value.trim().replace(/^@/,""), permid:$("f-permid").value.trim(),
     cardnum:$("f-cardnum").value.replace(/[^\d]/g,""), exp:$("f-exp").value.trim(), name:$("f-name").value.trim(),
-    memo:$("f-memo").value.trim() };
+    tags:$("f-tags").value.trim(), memo:$("f-memo").value.trim() };
   if (kind === "card" && item.cardnum && !luhn(item.cardnum)) { err.textContent = "カード番号のチェックディジットが合いません。"; return; }
-  if (!item.title && !item.userid && !item.url && !item.cardnum) { err.textContent = "何か1つは入れてください。"; return; }
+  if (!item.title && !item.userid && !item.url && !item.cardnum && !item.memo) { err.textContent = "何か1つは入れてください。"; return; }
   if (editId) vault.items = vault.items.map(x => x.id===editId ? item : x); else vault.items.unshift(item);
   await encryptVault(); $("dlg").close(); render();
 };
@@ -319,6 +388,25 @@ $("file-import").onchange = async ev => {
   try { const j = JSON.parse(await f.text()); if (!j.ct || !j.salt) throw 0;
     localStorage.setItem(LS_KEY, JSON.stringify(j)); initGate(); $("gate-err").textContent = "読み込みました。そのバックアップのパスワードで開いてください。";
   } catch { $("gate-err").textContent = "バックアップファイルとして読めませんでした。"; }
+};
+/* 開いた状態での読み込み：バックアップを復号して今の保管庫に合体する */
+$("btn-import2").onclick = () => $("file-import2").click();
+$("file-import2").onchange = async ev => {
+  const f = ev.target.files[0]; ev.target.value = ""; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    if (!j.ct || !j.salt) throw new Error("bad file");
+    const pw = prompt("そのバックアップのマスターパスワードを入力してください");
+    if (!pw) return;
+    const r = await decryptVault(pw, j);
+    const have = new Set(vault.items.map(x => x.id));
+    let added = 0;
+    for (const it of (r.data.items || [])) {
+      if (!have.has(it.id)) { vault.items.push(it); added++; }
+    }
+    await encryptVault(); render();
+    alert(`読み込み完了：${added}件を追加しました（重複は除外）。`);
+  } catch { alert("読み込めませんでした。ファイルかパスワードを確認してください。"); }
 };
 $("btn-chpw").onclick = async () => {
   const np = prompt("新しいマスターパスワード"); if (!np) return;
