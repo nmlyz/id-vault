@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ID保管庫</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%234f8cff'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white'>🔒</text></svg>">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+:root{--bg:#0f1115;--card:#1a1d24;--line:#2a2e38;--tx:#e8eaee;--mut:#9aa3b2;--acc:#4f8cff;--danger:#ff5c5c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"Hiragino Sans",sans-serif;font-size:15px}
+header{position:sticky;top:0;background:var(--bg);padding:14px 16px 8px;border-bottom:1px solid var(--line);z-index:5}
+h1{font-size:19px;margin:0 0 8px}
+input,select,textarea,button{font-size:16px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--tx);padding:10px;width:100%}
+button{background:var(--acc);border:none;color:#fff;font-weight:600;cursor:pointer}
+button.ghost{background:var(--card);color:var(--tx);border:1px solid var(--line)}
+button.danger{background:transparent;color:var(--danger);border:1px solid var(--danger)}
+main{padding:12px 16px 90px;max-width:640px;margin:0 auto}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+.card .svc{font-size:12px;color:var(--acc);font-weight:700;letter-spacing:.04em}
+.card .ttl{font-size:16px;font-weight:700;margin:2px 0}
+.card .sub{color:var(--mut);font-size:13px;word-break:break-all}
+.card .acts{display:flex;gap:8px;margin-top:8px}.card .acts button{padding:7px;font-size:13px}
+.mut{color:var(--mut);font-size:13px}
+.hidden{display:none!important}
+label{font-size:13px;color:var(--mut);display:block;margin:10px 0 4px}
+#fab{position:fixed;right:18px;bottom:24px;width:56px;height:56px;border-radius:50%;font-size:26px;padding:0;z-index:6}
+.chip{display:inline-block;background:#242833;border-radius:999px;padding:3px 10px;font-size:12px;margin:2px 2px 0 0;color:var(--mut)}
+dialog{background:var(--card);color:var(--tx);border:1px solid var(--line);border-radius:16px;width:min(92vw,560px);max-height:88vh;overflow:auto}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+.err{color:var(--danger);font-size:13px;min-height:18px}
+</style>
+</head>
+<body>
+<header>
+  <h1>ID保管庫 <span class="mut" style="font-size:12px">v1.1</span></h1>
+  <div id="lockbar" class="row hidden">
+    <input id="q" type="search" placeholder="検索（名前・ID・サービス名）" style="flex:3">
+    <button id="btn-lock" class="ghost" style="flex:1">ロック</button>
+  </div>
+</header>
+<main>
+  <!-- 初回設定 / 解錠 -->
+  <section id="gate">
+    <div class="card">
+      <p id="gate-msg">読み込み中…</p>
+      <label>マスターパスワード</label>
+      <input id="pw" type="password" autocomplete="off">
+      <label id="pw2-label" class="hidden">もう一度入力</label>
+      <input id="pw2" type="password" autocomplete="off" class="hidden">
+      <p class="err" id="gate-err"></p>
+      <button id="btn-gate">開く</button>
+      <p class="mut">データはこの端末のローカルストレージだけに、AES-GCM暗号化して保存されます。サーバー送信・外部送信は一切しません。パスワード自体はどこにも保存しません（鍵はメモリ上のみで、画面を閉じる／裏に回すと自動ロックします）。パスワードを忘れると復旧できません。</p>
+      <div class="row">
+        <button id="btn-import" class="ghost">暗号化バックアップを読み込む</button>
+        <input id="file-import" type="file" accept=".json" class="hidden">
+      </div>
+    </div>
+  </section>
+
+  <!-- 一覧 -->
+  <section id="list" class="hidden"></section>
+
+  <!-- 追加・編集 -->
+  <dialog id="dlg">
+    <form method="dialog" id="form">
+      <h3 id="dlg-title" style="margin:4px 0">追加</h3>
+      <label>URLを貼る（サービスはドメインで自動判定）</label>
+      <div class="row"><input id="f-url" type="url" placeholder="https://…" style="flex:3"><button type="button" id="btn-parse" style="flex:1">判定</button></div>
+      <p class="mut" id="parse-note"></p>
+      <label>種類</label>
+      <select id="f-kind">
+        <option value="account">アカウント / ID</option>
+        <option value="post">投稿（ツイート・動画など）</option>
+        <option value="site">サイト</option>
+        <option value="card">クレジットカード</option>
+        <option value="other">その他</option>
+      </select>
+      <label>サービス</label><input id="f-service" placeholder="X / TikTok / Instagram …">
+      <label>表示名</label><input id="f-title" placeholder="名前・メモ用の見出し">
+      <label id="lb-userid">ユーザーID（@スクリーンネーム等）</label><input id="f-userid">
+      <label id="lb-permid">恒久ID（改名しても変わらないID）</label><input id="f-permid">
+      <p class="mut" id="permid-hint"></p>
+      <div id="card-fields" class="hidden">
+        <label>カード番号</label><input id="f-cardnum" inputmode="numeric" autocomplete="off" placeholder="数字のみ">
+        <div class="row"><div><label>有効期限（MM/YY）</label><input id="f-exp" placeholder="12/28"></div>
+        <div><label>名義</label><input id="f-name"></div></div>
+        <p class="mut" id="card-brand"></p>
+      </div>
+      <label>メモ</label><textarea id="f-memo" rows="3"></textarea>
+      <p class="err" id="form-err"></p>
+      <div class="row" style="margin-top:12px">
+        <button type="button" id="btn-save">保存</button>
+        <button type="button" id="btn-cancel" class="ghost">キャンセル</button>
+      </div>
+      <button type="button" id="btn-del" class="danger hidden" style="margin-top:10px">この項目を削除</button>
+    </form>
+  </dialog>
+
+  <div id="tools" class="hidden" style="margin-top:16px">
+    <div class="row">
+      <button id="btn-export" class="ghost">暗号化バックアップをファイルに書き出す</button>
+      <button id="btn-chpw" class="ghost">パスワード変更</button>
+    </div>
+  </div>
+</main>
+<button id="fab" class="hidden">＋</button>
+
+<script>
+"use strict";
+/* ========= 保存先はこの端末の localStorage のみ。通信は一切しない ========= */
+const LS_KEY = "idvault.v1";
+let vault = null;        // 平文データ（メモリ上のみ）
+let masterKey = null;    // CryptoKey（メモリ上のみ）
+let saltB64 = null, editId = null;
+
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+async function deriveKey(password, salt) {
+  const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2", salt, iterations:600000, hash:"SHA-256"}, base, {name:"AES-GCM", length:256}, false, ["encrypt","decrypt"]);
+}
+async function encryptVault() {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv}, masterKey, enc.encode(JSON.stringify(vault)));
+  localStorage.setItem(LS_KEY, JSON.stringify({v:1, salt:saltB64, iv:b64(iv), ct:b64(ct)}));
+}
+async function decryptVault(password, blob) {
+  const salt = unb64(blob.salt);
+  const key = await deriveKey(password, salt);
+  const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv:unb64(blob.iv)}, key, unb64(blob.ct));
+  return {data: JSON.parse(dec.decode(pt)), key, saltB64: blob.salt};
+}
+function loadBlob() { try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch { return null; } }
+
+/* ========= URL判定：ドメイン→サービス、恒久IDの抽出 ========= */
+function parseUrl(raw) {
+  const out = {service:"", kind:"site", title:"", userid:"", permid:"", url:raw||"", note:"", permidHint:""};
+  if (!raw) return out;
+  let u; try { u = new URL(raw.trim()); } catch { out.note = "URLとして読めませんでした。そのまま保存できます。"; return out; }
+  const host = u.hostname.replace(/^www\.|^m\./, ""), seg = u.pathname.split("/").filter(Boolean);
+  const isX = ["x.com","twitter.com"].includes(host), isTT = host.endsWith("tiktok.com");
+  if (isX) {
+    out.service = "X";
+    if (seg[0] === "i" && seg[1] === "user" && /^\d+$/.test(seg[2]||"")) {
+      out.kind = "account"; out.permid = seg[2];
+      out.note = "恒久IDリンクから取り込みました。改名しても追えます。";
+    } else if (seg[1] === "status" && /^\d+$/.test(seg[2]||"")) {
+      out.kind = "post"; out.userid = seg[0]; out.permid = seg[2]; out.title = "ツイート";
+      out.note = "ツイートID（恒久）で保存。投稿そのものはこのURLが正本です。";
+    } else if (seg[0] && !["home","search","explore","i","settings"].includes(seg[0])) {
+      out.kind = "account"; out.userid = seg[0];
+      out.note = "スクリーンネームで取り込みました。恒久の数値IDが分かれば「恒久ID」欄に入れると改名に強くなります。";
+    }
+    out.permidHint = "Xの数値ユーザーIDは一生変わりません。IDが入っていれば、開くときは https://x.com/i/user/<ID> を使い、今のスクリーンネームへ自動で飛びます。";
+  } else if (isTT) {
+    out.service = "TikTok";
+    const at = seg.find(s => s.startsWith("@"));
+    if (seg.includes("video") ) {
+      const vid = seg[seg.indexOf("video")+1];
+      out.kind = "post"; if (at) out.userid = at.slice(1);
+      if (/^\d+$/.test(vid||"")) { out.permid = vid; out.title = "TikTok動画"; out.note = "動画ID（恒久）で保存しました。"; }
+    } else if (at) {
+      out.kind = "account"; out.userid = at.slice(1);
+      out.note = "@ユーザー名で取り込みました。TikTokの@名は変更可能なので、恒久ID（secUid）も併せて入れると確実です。";
+    }
+    out.permidHint = "TikTokの恒久IDは secUid（MS4wLjABAAAA…）と数値ID。プロフィール共有やWeb版プロフィールのソースに出ます。@名が変わっても secUid で同一人物を特定できます。";
+  } else if (host.endsWith("instagram.com")) {
+    out.service = "Instagram"; out.kind = "account";
+    if (seg[0] && !["p","reel","stories","explore"].includes(seg[0])) out.userid = seg[0];
+    if (["p","reel"].includes(seg[0])) { out.kind = "post"; out.permid = seg[1]||""; }
+    out.permidHint = "Instagramも数値ユーザーIDが恒久。分かれば入れてください。";
+  } else if (host.endsWith("youtube.com") || host === "youtu.be") {
+    out.service = "YouTube";
+    if (seg[0] === "channel" && seg[1]) { out.kind="account"; out.permid = seg[1]; out.note = "チャンネルID（UC…）は恒久です。このIDのリンクで開きます。"; }
+    else if (seg[0]?.startsWith("@")) { out.kind="account"; out.userid = seg[0].slice(1); }
+    else if (u.searchParams.get("v")) { out.kind="post"; out.permid = u.searchParams.get("v"); out.title="YouTube動画"; }
+    out.permidHint = "YouTubeは UC から始まるチャンネルIDが恒久。@ハンドルは変更可能です。";
+  } else if (host.endsWith("github.com")) {
+    out.service = "GitHub"; out.kind = "account"; if (seg[0]) out.userid = seg[0];
+  } else {
+    out.service = host; out.kind = "site"; out.title = host;
+  }
+  return out;
+}
+function openUrl(e) {
+  if (e.kind === "account" && e.permid) {
+    if (e.service === "X") return "https://x.com/i/user/" + e.permid;
+    if (e.service === "YouTube") return "https://www.youtube.com/channel/" + e.permid;
+  }
+  return e.url || "";
+}
+/* ========= カード ========= */
+function cardBrand(num) {
+  const n = num.replace(/\D/g,"");
+  if (/^4/.test(n)) return "Visa"; if (/^(5[1-5]|2[2-7])/.test(n)) return "Mastercard";
+  if (/^3[47]/.test(n)) return "Amex"; if (/^35/.test(n)) return "JCB";
+  if (/^3(0[0-5]|[68])/.test(n)) return "Diners"; if (/^6/.test(n)) return "Discover/銀聯系"; return "";
+}
+function luhn(num) {
+  const n = num.replace(/\D/g,""); if (n.length < 12) return false;
+  let s = 0; for (let i=0;i<n.length;i++){ let d=+n[n.length-1-i]; if (i%2){ d*=2; if(d>9)d-=9; } s+=d; }
+  return s % 10 === 0;
+}
+const maskNum = n => { const d=(n||"").replace(/\D/g,""); return d ? "•••• " + d.slice(-4) : ""; };
+
+/* ========= 画面 ========= */
+function initGate() {
+  const blob = loadBlob();
+  $("pw2").classList.toggle("hidden", !!blob); $("pw2-label").classList.toggle("hidden", !!blob);
+  $("gate-msg").textContent = blob ? "マスターパスワードで開きます。" : "初回設定：マスターパスワードを決めてください。";
+  $("btn-gate").textContent = blob ? "開く" : "作成して開く";
+}
+$("btn-gate").onclick = async () => {
+  const pw = $("pw").value, err = $("gate-err"); err.textContent = "";
+  if (!pw) { err.textContent = "パスワードを入力してください。"; return; }
+  const blob = loadBlob();
+  try {
+    if (blob) {
+      const r = await decryptVault(pw, blob);
+      vault = r.data; masterKey = r.key; saltB64 = r.saltB64;
+    } else {
+      if (pw !== $("pw2").value) { err.textContent = "2回目が一致しません。"; return; }
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      saltB64 = b64(salt); masterKey = await deriveKey(pw, salt);
+      vault = {items: []};
+      await encryptVault();
+    }
+    $("gate").classList.add("hidden"); $("list").classList.remove("hidden");
+    $("lockbar").classList.remove("hidden"); $("fab").classList.remove("hidden"); $("tools").classList.remove("hidden");
+    $("pw").value = $("pw2").value = "";
+    render();
+  } catch { err.textContent = "パスワードが違うか、データが壊れています。"; }
+};
+$("btn-lock").onclick = () => location.reload();
+/* 厳重管理：アプリが裏に回ったら自動ロック（鍵をメモリから捨てる） */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && vault) location.reload();
+});
+$("q").oninput = () => render();
+
+function render() {
+  const q = ($("q").value||"").toLowerCase(), el = $("list"); el.innerHTML = "";
+  const items = vault.items.filter(e => !q || JSON.stringify(e).toLowerCase().includes(q));
+  if (!items.length) { el.innerHTML = '<p class="mut">まだ何もありません。右下の＋から、URLを貼るだけで追加できます。</p>'; return; }
+  for (const e of items) {
+    const d = document.createElement("div"); d.className = "card";
+    const shown = e.kind === "card" ? maskNum(e.cardnum) : (e.userid ? "@"+e.userid : (e.permid||""));
+    d.innerHTML = `<div class="svc"></div><div class="ttl"></div><div class="sub"></div>
+      <div>${e.permid?'<span class="chip">恒久IDあり（改名OK）</span>':""}${e.kind==="card"?'<span class="chip"></span>':""}</div>
+      <div class="acts"><button class="ghost b-open">開く</button><button class="ghost b-copy">IDをコピー</button><button class="ghost b-edit">編集</button></div>`;
+    d.querySelector(".svc").textContent = e.service || e.kind;
+    d.querySelector(".ttl").textContent = e.title || e.userid || e.service || "(無題)";
+    d.querySelector(".sub").textContent = shown + (e.memo ? " ／ " + e.memo : "");
+    const chips = d.querySelectorAll(".chip"); if (chips[1]) chips[1].textContent = cardBrand(e.cardnum||"");
+    const url = openUrl(e);
+    d.querySelector(".b-open").onclick = () => { if (url) location.href = url; else if (e.kind==="card") { alert("カード番号（下4桁）: " + maskNum(e.cardnum) + "\n全番号は編集画面で確認できます。"); } };
+    d.querySelector(".b-copy").onclick = ev => { navigator.clipboard?.writeText(e.permid || e.userid || e.cardnum || ""); ev.target.textContent = "コピー済み"; setTimeout(()=>ev.target.textContent="IDをコピー",1200); };
+    d.querySelector(".b-edit").onclick = () => openForm(e);
+    el.appendChild(d);
+  }
+}
+
+/* ========= フォーム ========= */
+function openForm(e) {
+  editId = e ? e.id : null;
+  $("dlg-title").textContent = e ? "編集" : "追加";
+  for (const k of ["url","service","title","userid","permid","cardnum","exp","name","memo"]) $("f-"+k).value = e ? (e[k]||"") : "";
+  $("f-kind").value = e ? e.kind : "account";
+  $("btn-del").classList.toggle("hidden", !e);
+  $("parse-note").textContent = ""; $("permid-hint").textContent = "";
+  toggleCardFields(); $("dlg").showModal();
+}
+function toggleCardFields(){ $("card-fields").classList.toggle("hidden", $("f-kind").value !== "card"); }
+$("f-kind").onchange = toggleCardFields;
+$("f-cardnum").oninput = () => { const n=$("f-cardnum").value; $("card-brand").textContent = n ? (cardBrand(n) + (luhn(n)?" ／ 番号チェックOK":" ／ 番号を確認してください")) : ""; };
+$("btn-parse").onclick = () => {
+  const p = parseUrl($("f-url").value);
+  if (p.service) $("f-service").value = p.service;
+  $("f-kind").value = p.kind; if (p.title) $("f-title").value = p.title;
+  if (p.userid) $("f-userid").value = p.userid;
+  if (p.permid) $("f-permid").value = p.permid;
+  $("parse-note").textContent = p.note; $("permid-hint").textContent = p.permidHint;
+  toggleCardFields();
+};
+$("f-url").onchange = () => $("btn-parse").click();
+$("fab").onclick = () => openForm(null);
+$("btn-cancel").onclick = () => $("dlg").close();
+$("btn-save").onclick = async () => {
+  const kind = $("f-kind").value, err = $("form-err"); err.textContent = "";
+  const item = { id: editId || Date.now().toString(36), kind,
+    url:$("f-url").value.trim(), service:$("f-service").value.trim(), title:$("f-title").value.trim(),
+    userid:$("f-userid").value.trim().replace(/^@/,""), permid:$("f-permid").value.trim(),
+    cardnum:$("f-cardnum").value.replace(/[^\d]/g,""), exp:$("f-exp").value.trim(), name:$("f-name").value.trim(),
+    memo:$("f-memo").value.trim() };
+  if (kind === "card" && item.cardnum && !luhn(item.cardnum)) { err.textContent = "カード番号のチェックディジットが合いません。"; return; }
+  if (!item.title && !item.userid && !item.url && !item.cardnum) { err.textContent = "何か1つは入れてください。"; return; }
+  if (editId) vault.items = vault.items.map(x => x.id===editId ? item : x); else vault.items.unshift(item);
+  await encryptVault(); $("dlg").close(); render();
+};
+$("btn-del").onclick = async () => { vault.items = vault.items.filter(x => x.id!==editId); await encryptVault(); $("dlg").close(); render(); };
+
+/* ========= バックアップ（暗号文のまま） ========= */
+$("btn-export").onclick = () => {
+  const blob = localStorage.getItem(LS_KEY);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([blob], {type:"application/json"}));
+  a.download = "id-vault-backup.json"; a.click(); URL.revokeObjectURL(a.href);
+};
+$("btn-import").onclick = () => $("file-import").click();
+$("file-import").onchange = async ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  try { const j = JSON.parse(await f.text()); if (!j.ct || !j.salt) throw 0;
+    localStorage.setItem(LS_KEY, JSON.stringify(j)); initGate(); $("gate-err").textContent = "読み込みました。そのバックアップのパスワードで開いてください。";
+  } catch { $("gate-err").textContent = "バックアップファイルとして読めませんでした。"; }
+};
+$("btn-chpw").onclick = async () => {
+  const np = prompt("新しいマスターパスワード"); if (!np) return;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  saltB64 = b64(salt); masterKey = await deriveKey(np, salt);
+  await encryptVault(); alert("変更しました。");
+};
+initGate();
+</script>
+</body>
+</html>
